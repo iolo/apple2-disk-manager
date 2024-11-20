@@ -1,220 +1,39 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-    <title>Apple II Disk Image Viewer</title>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>apple2-disk-manager</title>
     <style>
-        #fileContent {
-            font-family: monospace;
-            white-space: pre;
-            overflow: auto;
-            height: 300px;
-            border: 1px solid #ccc;
-            padding: 4px;
-        }
+      #fileTable {
+        border: 1px solid #ccc;
+        padding: 4px;
+      }
+      #fileContent {
+        font-family: monospace;
+        white-space: pre;
+        overflow: auto;
+        height: 300px;
+        border: 1px solid #ccc;
+        padding: 4px;
+      }
     </style>
-</head>
-<body>
-    <input type="file" id="fileInput" accept=".dsk,.po">
+    <script type="module" src="script.js" defer></script>
+  </head>
+  <body>
+    <h1>apple2-disk-manager</h1>
+    <input type="file" id="fileInput" accept=".dsk,.po" />
     <table id="fileTable">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Size</th>
-                <th>Type</th>
-                <th>Flags</th>
-            </tr>
-        </thead>
-        <tbody>
-        </tbody>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Size</th>
+          <th>Type</th>
+          <th>Flags</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
     </table>
     <div id="fileContent"></div>
-
-    <script>
-        let diskData = null;
-
-        const BYTES_PER_SECTOR = 256;
-        const SECTORS_PER_TRACK = 16;
-        const VTOC_TRACK = 17;
-        const VTOC_SECTOR = 0;
-
-        function readSector(track, sector) {
-            if (!diskData) return null;
-            if (track < 0 || track > 34) return null;
-            if (sector < 0 || sector > 15) return null;
-
-            const offset = (track * SECTORS_PER_TRACK + sector) * BYTES_PER_SECTOR;
-            return diskData.slice(offset, offset + BYTES_PER_SECTOR);
-        }
-
-        function readVTOC() {
-            const vtocData = readSector(VTOC_TRACK, VTOC_SECTOR);
-            if (!vtocData) return null;
-
-            return {
-                dosVersion: vtocData[3],
-                volumeNumber: vtocData[6],
-                tracksPerDisk: vtocData[0x34],
-                sectorsPerTrack: vtocData[0x35],
-                bytesPerSector: vtocData[0x36] + (vtocData[0x37] << 8),
-                firstCatalogTrack: vtocData[1],
-                firstCatalogSector: vtocData[2],
-                freeSectors: {
-                    count: vtocData[0x31] + (vtocData[0x32] << 8),
-                    bitmap: Array.from({length: 35}, (_, i) => {
-                        const byte = vtocData[0x38 + i];
-                        return Array.from({length: 8}, (_, j) => !!(byte & (1 << j)));
-                    })
-                }
-            };
-        }
-
-        function readCatalogSector(track, sector) {
-            const sectorData = readSector(track, sector);
-            if (!sectorData) return null;
-
-            return {
-                nextTrack: sectorData[0x01],
-                nextSector: sectorData[0x02],
-                entries: Array.from({length: 7}, (_, i) => {
-                    const offset = 0x0B + (i * 0x23);
-                    const entryData = sectorData.slice(offset, offset + 0x23);
-                    return {
-                        raw: entryData,
-                        track: entryData[0],
-                        sector: entryData[1],
-                        fileType: entryData[2],
-                        fileName: entryData.slice(3, 0x13),
-                        sectorCount: entryData[0x21] + (entryData[0x22] << 8),
-                        // Store track/sector list for file content reading
-                        tsListTrack: entryData[0],
-                        tsListSector: entryData[1]
-                    };
-                })
-            };
-        }
-
-        function readCatalog(firstCatalogTrack, firstCatalogSector) {
-            let track = firstCatalogTrack;
-            let sector = firstCatalogSector;
-            const fileEntries = [];
-
-            while (track !== 0) {
-                const catalogSector = readCatalogSector(track, sector);
-                if (!catalogSector) break;
-
-                const validEntries = catalogSector.entries.filter(entry =>
-                    entry.track !== 0 && entry.track !== 255
-                );
-                fileEntries.push(...validEntries);
-
-                track = catalogSector.nextTrack;
-                sector = catalogSector.nextSector;
-            }
-
-            return fileEntries;
-        }
-
-        function readFileContent(fileEntry) {
-            // Read T/S List sector
-            const tsListData = readSector(fileEntry.tsListTrack, fileEntry.tsListSector);
-            if (!tsListData) return null;
-
-            const fileData = [];
-            // Each T/S List sector can point to up to 122 sectors (244 bytes of T/S pairs)
-            for (let i = 0; i < 122; i++) {
-                const trackOffset = 12 + i * 2;
-                const sectorOffset = trackOffset + 1;
-
-                const track = tsListData[trackOffset];
-                const sector = tsListData[sectorOffset];
-
-                // Track 0 means end of file
-                if (track === 0) break;
-
-                const sectorData = readSector(track, sector);
-                if (sectorData) {
-                    fileData.push(...sectorData);
-                }
-            }
-
-            return fileData;
-        }
-
-        function formatHexDump(data) {
-            const lines = [];
-            for (let offset = 0; offset < data.length; offset += 16) {
-                // Get 16 bytes for this line
-                const bytes = data.slice(offset, offset + 16);
-
-                // Format hex part
-                const hex = Array.from(bytes)
-                    .map(b => b.toString(16).padStart(2, '0'))
-                    .join(' ');
-
-                // Format ASCII part
-                const ascii = Array.from(bytes)
-                    .map(b => (b >= 32 && b < 127) ? String.fromCharCode(b) : '.')
-                    .join('');
-
-                // Combine offset, hex, and ASCII
-                const offsetHex = offset.toString(16).padStart(4, '0');
-                const paddedHex = hex.padEnd(16 * 3 - 1, ' ');
-                lines.push(`${offsetHex}: ${paddedHex}  |${ascii}|`);
-            }
-            return lines.join('\n');
-        }
-
-        document.getElementById('fileInput').addEventListener('change', async (event) => {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            try {
-                const arrayBuffer = await file.arrayBuffer();
-                diskData = new Uint8ClampedArray(arrayBuffer);
-                console.log(`Read ${diskData.length} bytes`);
-
-                const vtoc = readVTOC();
-                if (vtoc) {
-                    const fileEntries = readCatalog(vtoc.firstCatalogTrack, vtoc.firstCatalogSector);
-
-                    // Clear the table
-                    const tbody = document.querySelector('#fileTable tbody');
-                    tbody.innerHTML = '';
-
-                    // Display file entries
-                    fileEntries.forEach(entry => {
-                        const fileName = Array.from(entry.fileName)
-                            .map(b => b === 0xA0 ? ' ' : String.fromCharCode(b & 0x7F))
-                            .join('')
-                            .trim();
-
-                        const row = tbody.insertRow();
-                        row.insertCell().textContent = fileName;
-                        row.insertCell().textContent = entry.sectorCount * BYTES_PER_SECTOR;
-                        row.insertCell().textContent = '0x' + entry.fileType.toString(16).padStart(2, '0');
-                        row.insertCell().textContent = '0x' + entry.raw[2].toString(16).padStart(2, '0');
-
-                        // Add click handler for this row
-                        row.addEventListener('click', () => {
-                            // Remove selection from other rows
-                            tbody.querySelectorAll('tr').forEach(r => r.style.backgroundColor = '');
-                            // Highlight selected row
-                            row.style.backgroundColor = '#e0e0e0';
-
-                            // Read and display file content
-                            const content = readFileContent(entry);
-                            if (content) {
-                                document.getElementById('fileContent').textContent = formatHexDump(content);
-                            } else {
-                                document.getElementById('fileContent').textContent = 'Error reading file content';
-                            }
-                        });
-                    });
-                }
-            } catch (error) {
-                console.error('Error reading file:', error);
-            }
-        });
-    </script>
-</body>
+  </body>
 </html>
