@@ -1,0 +1,34 @@
+@font-face {
+  font-family: '7x12';
+  src:
+    url('https://raw.githubusercontent.com/iolo/7x12-fonts/refs/heads/main/7x12.woff') format('woff'),
+    url('https://raw.githubusercontent.com/iolo/7x12-fonts/refs/heads/main/7x12.woff2') format('woff2'),
+    url('https://raw.githubusercontent.com/iolo/7x12-fonts/refs/heads/main/7x12.ttf') format('ttf');
+}
+
+:root {
+  font-family: '7x12', monospace;
+  font-size: 24px;
+  color: #0f0;
+  background: #000;
+}
+
+a:link,
+a:visited {
+  color: #000;
+  background: #0f0;
+  text-decoration: none;
+}
+
+#fileTable {
+  border: 1px solid #ccc;
+  padding: 4px;
+}
+#fileContent {
+  font-family: '7x12', monospace;
+  white-space: pre;
+  overflow: auto;
+  height: 300px;
+  border: 1px solid #ccc;
+  padding: 4px;
+}
